@@ -52,8 +52,18 @@ export default function App() {
 
   const fetchAppData = async (userId) => {
     try {
-      const { data } = await supabase.from('clientes_max').select('*').eq('user_id', userId);
-      if (data) setClients(data);
+      const { data: clientData } = await supabase.from('clientes_max').select('*').eq('user_id', userId);
+      if (clientData) setClients(clientData);
+
+      const { data: configData } = await supabase.from('config_max').select('*').eq('user_id', userId).single();
+      if (configData) {
+        setConfig({
+          custo_painel1: configData.custo_painel1 ?? 5.00,
+          revenda_painel1: configData.revenda_painel1 ?? 8.00,
+          custo_painel2_fixo: configData.custo_painel2_fixo ?? 200.00,
+          revenda_painel2: configData.revenda_painel2 ?? 30.00
+        });
+      }
     } catch (e) {
       console.error(e);
     }
@@ -81,6 +91,27 @@ export default function App() {
     await supabase.auth.signOut();
   };
 
+  const handleSaveConfig = async () => {
+    if (!session) return;
+    const payload = {
+      user_id: session.user.id,
+      custo_painel1: parseFloat(config.custo_painel1) || 0,
+      revenda_painel1: parseFloat(config.revenda_painel1) || 0,
+      custo_painel2_fixo: parseFloat(config.custo_painel2_fixo) || 0,
+      revenda_painel2: parseFloat(config.revenda_painel2) || 0
+    };
+
+    const { data: existing } = await supabase.from('config_max').select('id').eq('user_id', session.user.id).single();
+
+    if (existing) {
+      await supabase.from('config_max').update(payload).eq('user_id', session.user.id);
+    } else {
+      await supabase.from('config_max').insert([payload]);
+    }
+
+    alert('Configurações salvas com sucesso!');
+  };
+
   const handleOpenEdit = (client) => {
     setEditingClient(client);
     setFormData({
@@ -100,12 +131,21 @@ export default function App() {
     e.preventDefault();
     if (!session) return;
 
+    let brutoCalculado = parseFloat(formData.valor_plano) || 0;
+    if (formData.tipo === 'Revendedor') {
+      if (formData.painel.includes('Painel 1')) {
+        brutoCalculado = (parseInt(formData.qtd_ativos_p1) || 0) * config.revenda_painel1;
+      } else {
+        brutoCalculado = (parseInt(formData.qtd_ativos_p2) || 0) * config.revenda_painel2;
+      }
+    }
+
     const payload = {
       user_id: session.user.id,
       nome: formData.nome,
       tipo: formData.tipo,
       painel: formData.painel,
-      valor_plano: parseFloat(formData.valor_plano) || 0,
+      valor_plano: brutoCalculado,
       dispositivo: formData.dispositivo,
       observacoes: formData.observacoes,
       qtd_ativos_p1: parseInt(formData.qtd_ativos_p1) || 0,
@@ -146,7 +186,7 @@ export default function App() {
     }
   };
 
-  // ---- LÓGICA CORRIGIDA (USA O VALOR INDIVIDUAL DO PLANO OU REVENDA) ----
+  // ---- LÓGICA DE CÁLCULO ----
   const totalReceitaP2 = clients.filter(c => c.painel.includes('Painel 2')).reduce((acc, c) => {
     if (c.tipo === 'Revendedor') {
       return acc + ((c.qtd_ativos_p2 || 0) * config.revenda_painel2);
@@ -170,12 +210,10 @@ export default function App() {
         bruto = ativos * config.revenda_painel1;
         custo = ativos * config.custo_painel1;
       } else {
-        // Cliente direto usa o valor específico digitado no campo de valor do plano
         bruto = client.valor_plano || 0;
         custo = config.custo_painel1;
       }
     } else {
-      // Painel 2
       if (client.tipo === 'Revendedor') {
         const ativos = client.qtd_ativos_p2 || 0;
         bruto = ativos * config.revenda_painel2;
@@ -414,20 +452,23 @@ export default function App() {
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Custo por Ativo - Painel 1 (Sigma)</label>
-                <input type="number" step="0.01" value={config.custo_painel1} onChange={(e) => setConfig({...config, custo_painel1: parseFloat(e.target.value) || 0})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
+                <input type="number" step="0.01" value={config.custo_painel1} onChange={(e) => setConfig({...config, custo_painel1: e.target.value})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Valor Padrão Revenda - Painel 1</label>
-                <input type="number" step="0.01" value={config.revenda_painel1} onChange={(e) => setConfig({...config, revenda_painel1: parseFloat(e.target.value) || 0})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
+                <input type="number" step="0.01" value={config.revenda_painel1} onChange={(e) => setConfig({...config, revenda_painel1: e.target.value})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Custo Fixo Mensal - Painel 2 (Zenpanel)</label>
-                <input type="number" step="0.01" value={config.custo_painel2_fixo} onChange={(e) => setConfig({...config, custo_painel2_fixo: parseFloat(e.target.value) || 0})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
+                <input type="number" step="0.01" value={config.custo_painel2_fixo} onChange={(e) => setConfig({...config, custo_painel2_fixo: e.target.value})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Valor Padrão Revenda - Painel 2</label>
-                <input type="number" step="0.01" value={config.revenda_painel2} onChange={(e) => setConfig({...config, revenda_painel2: parseFloat(e.target.value) || 0})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
+                <input type="number" step="0.01" value={config.revenda_painel2} onChange={(e) => setConfig({...config, revenda_painel2: e.target.value})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
               </div>
+              <button onClick={handleSaveConfig} className="w-full py-3 bg-amber-500 text-gray-950 font-bold rounded-xl mt-4">
+                Salvar Configurações
+              </button>
             </div>
           </div>
         )}
