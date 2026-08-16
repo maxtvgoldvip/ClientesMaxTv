@@ -80,7 +80,7 @@ export default function App() {
       if (isSignUp) {
         const { error } = await supabase.auth.signUp({ email, password });
         if (error) throw error;
-        alert('Cadastro realizado! Verifique seu e-mail para confirmar.');
+        alert('Cadastro realizado com sucesso!');
         setIsSignUp(false);
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -225,7 +225,11 @@ export default function App() {
         bruto = client.valor_plano || 0;
       }
 
-      custo = painel2Pago ? 0 : Math.min(bruto, saldoP2Restante);
+      if (isAdmin) {
+        custo = painel2Pago ? 0 : Math.min(bruto, saldoP2Restante);
+      } else {
+        custo = 0;
+      }
     }
 
     const liquido = bruto - custo;
@@ -331,7 +335,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-xl font-bold tracking-wider text-white">MAX TV <span className="text-amber-400">GOLD VIP</span></h1>
-              <p className="text-xs text-gray-400">Sigma & Zenpanel — Controle Financeiro</p>
+              <p className="text-xs text-gray-400">{isAdmin ? "Painel do Administrador" : "Painel do Revendedor"}</p>
             </div>
           </div>
 
@@ -339,10 +343,12 @@ export default function App() {
             <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 rounded-xl text-sm font-medium transition ${activeTab === 'dashboard' ? 'bg-amber-500 text-gray-950 font-semibold' : 'bg-[#1f2937] text-gray-300'}`}>
               Painel Principal
             </button>
-            <button onClick={() => setActiveTab('config')} className={`px-4 py-2 rounded-xl text-sm font-medium flex items-center space-x-2 transition ${activeTab === 'config' ? 'bg-amber-500 text-gray-950 font-semibold' : 'bg-[#1f2937] text-gray-300'}`}>
-              <Settings className="w-4 h-4" />
-              <span>Configurações</span>
-            </button>
+            {isAdmin && (
+              <button onClick={() => setActiveTab('config')} className={`px-4 py-2 rounded-xl text-sm font-medium flex items-center space-x-2 transition ${activeTab === 'config' ? 'bg-amber-500 text-gray-950 font-semibold' : 'bg-[#1f2937] text-gray-300'}`}>
+                <Settings className="w-4 h-4" />
+                <span>Configurações</span>
+              </button>
+            )}
             <button onClick={handleLogout} className="p-2 bg-red-950/40 text-red-400 border border-red-900/50 rounded-xl" title="Sair">
               <LogOut className="w-5 h-5" />
             </button>
@@ -353,30 +359,33 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-4 py-8 flex-1 w-full space-y-6">
         {activeTab === 'dashboard' ? (
           <>
-            <div className={`p-4 rounded-2xl border flex items-center justify-between ${painel2Pago ? 'bg-green-950/30 border-green-500/50 text-green-300' : 'bg-amber-950/30 border-amber-500/50 text-amber-300'}`}>
-              <div className="flex items-center space-x-3">
-                {painel2Pago ? <CheckCircle className="w-6 h-6 text-green-400" /> : <DollarSign className="w-6 h-6 text-amber-400" />}
-                <div>
-                  <h4 className="font-bold">Status do Custo Fixo — Painel 2 (Zenpanel)</h4>
-                  <p className="text-xs opacity-90">
-                    {painel2Pago 
-                      ? "Painel 2 PAGO! Custo quitado com folga, os demais cadastros geram 100% de lucro líquido." 
-                      : `Faltam R$ ${saldoP2Restante.toFixed(2)} em receita do Painel 2 para quitar o custo fixo de R$ 200,00.`}
-                  </p>
+            {/* O AVISO DO PAINEL 2 AGORA SÓ APARECE SE FOR ADMIN */}
+            {isAdmin && (
+              <div className={`p-4 rounded-2xl border flex items-center justify-between ${painel2Pago ? 'bg-green-950/30 border-green-500/50 text-green-300' : 'bg-amber-950/30 border-amber-500/50 text-amber-300'}`}>
+                <div className="flex items-center space-x-3">
+                  {painel2Pago ? <CheckCircle className="w-6 h-6 text-green-400" /> : <DollarSign className="w-6 h-6 text-amber-400" />}
+                  <div>
+                    <h4 className="font-bold">Status do Custo Fixo — Painel 2 (Zenpanel)</h4>
+                    <p className="text-xs opacity-90">
+                      {painel2Pago 
+                        ? "Painel 2 PAGO! Custo quitado com folga, os demais cadastros geram 100% de lucro líquido." 
+                        : `Faltam R$ ${saldoP2Restante.toFixed(2)} em receita do Painel 2 para quitar o custo fixo de R$ 200,00.`}
+                    </p>
+                  </div>
                 </div>
+                <span className="text-xs font-bold px-3 py-1 rounded-full bg-black/40 border border-current">
+                  {painel2Pago ? "QUITADO" : "EM ABERTO"}
+                </span>
               </div>
-              <span className="text-xs font-bold px-3 py-1 rounded-full bg-black/40 border border-current">
-                {painel2Pago ? "QUITADO" : "EM ABERTO"}
-              </span>
-            </div>
+            )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-[#111827] border border-amber-500/20 rounded-2xl p-6 shadow-xl relative">
-                <p className="text-xs uppercase tracking-wider text-gray-400 font-semibold">Receita Bruta Total</p>
+                <p className="text-xs uppercase tracking-wider text-gray-400 font-semibold">{isAdmin ? "Receita Bruta Total" : "Meu Faturamento Bruto"}</p>
                 <h3 className="text-3xl font-bold text-white mt-2">R$ {receitaBrutaTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h3>
               </div>
               <div className="bg-[#111827] border border-green-500/30 rounded-2xl p-6 shadow-xl relative">
-                <p className="text-xs uppercase tracking-wider text-gray-400 font-semibold">Lucro Líquido Total</p>
+                <p className="text-xs uppercase tracking-wider text-gray-400 font-semibold">{isAdmin ? "Lucro Líquido Total" : "Meu Lucro Líquido"}</p>
                 <h3 className="text-3xl font-bold text-green-400 mt-2">R$ {lucroLiquidoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h3>
               </div>
             </div>
@@ -464,34 +473,36 @@ export default function App() {
             </div>
           </>
         ) : (
-          <div className="bg-[#111827] border border-amber-500/30 rounded-2xl p-6 max-w-2xl mx-auto shadow-2xl space-y-6">
-            <h2 className="text-xl font-bold text-white flex items-center space-x-2">
-              <Settings className="w-6 h-6 text-amber-400" />
-              <span>Configurações Financeiras e Valores</span>
-            </h2>
+          isAdmin && (
+            <div className="bg-[#111827] border border-amber-500/30 rounded-2xl p-6 max-w-2xl mx-auto shadow-2xl space-y-6">
+              <h2 className="text-xl font-bold text-white flex items-center space-x-2">
+                <Settings className="w-6 h-6 text-amber-400" />
+                <span>Configurações Financeiras e Valores</span>
+              </h2>
 
-            <div className="space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Custo por Ativo - Painel 1 (Sigma)</label>
-                <input type="number" step="0.01" value={config.custo_painel1} onChange={(e) => setConfig({...config, custo_painel1: e.target.value})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Custo por Ativo - Painel 1 (Sigma)</label>
+                  <input type="number" step="0.01" value={config.custo_painel1} onChange={(e) => setConfig({...config, custo_painel1: e.target.value})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Valor Padrão Revenda - Painel 1</label>
+                  <input type="number" step="0.01" value={config.revenda_painel1} onChange={(e) => setConfig({...config, revenda_painel1: e.target.value})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Custo Fixo Mensal - Painel 2 (Zenpanel)</label>
+                  <input type="number" step="0.01" value={config.custo_painel2_fixo} onChange={(e) => setConfig({...config, custo_painel2_fixo: e.target.value})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Valor Padrão Revenda - Painel 2</label>
+                  <input type="number" step="0.01" value={config.revenda_painel2} onChange={(e) => setConfig({...config, revenda_painel2: e.target.value})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
+                </div>
+                <button onClick={handleSaveConfig} className="w-full py-3 bg-amber-500 text-gray-950 font-bold rounded-xl mt-4">
+                  Salvar Configurações
+                </button>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Valor Padrão Revenda - Painel 1</label>
-                <input type="number" step="0.01" value={config.revenda_painel1} onChange={(e) => setConfig({...config, revenda_painel1: e.target.value})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Custo Fixo Mensal - Painel 2 (Zenpanel)</label>
-                <input type="number" step="0.01" value={config.custo_painel2_fixo} onChange={(e) => setConfig({...config, custo_painel2_fixo: e.target.value})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Valor Padrão Revenda - Painel 2</label>
-                <input type="number" step="0.01" value={config.revenda_painel2} onChange={(e) => setConfig({...config, revenda_painel2: e.target.value})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
-              </div>
-              <button onClick={handleSaveConfig} className="w-full py-3 bg-amber-500 text-gray-950 font-bold rounded-xl mt-4">
-                Salvar Configurações
-              </button>
             </div>
-          </div>
+          )
         )}
       </main>
 
