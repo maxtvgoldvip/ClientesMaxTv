@@ -87,11 +87,26 @@ export default function App() {
     await supabase.auth.signOut();
   };
 
+  const handleOpenEdit = (client) => {
+    setEditingClient(client);
+    setFormData({
+      nome: client.nome || '',
+      tipo: client.tipo || 'Cliente Direto',
+      painel: client.painel || 'Painel 1 (Sigma)',
+      valor_plano: client.valor_plano || '',
+      dispositivo: client.dispositivo || 'TV Box',
+      observacoes: client.observacoes || '',
+      qtd_ativos_p1: client.qtd_ativos_p1 || 1,
+      qtd_ativos_p2: client.qtd_ativos_p2 || 0
+    });
+    setShowModal(true);
+  };
+
   const handleSaveClient = async (e) => {
     e.preventDefault();
     if (!session) return;
 
-    const newClient = {
+    const payload = {
       user_id: session.user.id,
       nome: formData.nome,
       tipo: formData.tipo,
@@ -100,16 +115,32 @@ export default function App() {
       dispositivo: formData.dispositivo,
       observacoes: formData.observacoes,
       qtd_ativos_p1: parseInt(formData.qtd_ativos_p1) || 0,
-      qtd_ativos_p2: parseInt(formData.qtd_ativos_p2) || 0,
-      created_at: new Date()
+      qtd_ativos_p2: parseInt(formData.qtd_ativos_p2) || 0
     };
 
     if (editingClient) {
-      setClients(clients.map(c => c.id === editingClient.id ? { ...newClient, id: c.id } : c));
+      const { error } = await supabase
+        .from('clientes_max')
+        .update(payload)
+        .eq('id', editingClient.id);
+
+      if (error) {
+        alert('Erro ao atualizar no banco: ' + error.message);
+      } else {
+        setClients(clients.map(c => c.id === editingClient.id ? { ...payload, id: c.id } : c));
+      }
       setEditingClient(null);
     } else {
-      const tempId = Date.now().toString();
-      setClients([{ ...newClient, id: tempId }, ...clients]);
+      const { data, error } = await supabase
+        .from('clientes_max')
+        .insert([payload])
+        .select();
+
+      if (error) {
+        alert('Erro ao salvar no banco: ' + error.message);
+      } else if (data) {
+        setClients([data[0], ...clients]);
+      }
     }
 
     setShowModal(false);
@@ -125,9 +156,18 @@ export default function App() {
     });
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = async (id) => {
     if (confirm('Deseja realmente excluir este cadastro?')) {
-      setClients(clients.filter(c => c.id !== id));
+      const { error } = await supabase
+        .from('clientes_max')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        alert('Erro ao excluir: ' + error.message);
+      } else {
+        setClients(clients.filter(c => c.id !== id));
+      }
     }
   };
 
@@ -148,10 +188,10 @@ export default function App() {
     let custo = 0;
 
     if (client.tipo === 'Revendedor') {
-      const valorP1 = client.qtd_ativos_p1 * config.revenda_painel1;
-      const valorP2 = client.qtd_ativos_p2 * config.revenda_painel2;
+      const valorP1 = (client.qtd_ativos_p1 || 0) * config.revenda_painel1;
+      const valorP2 = (client.qtd_ativos_p2 || 0) * config.revenda_painel2;
       bruto = valorP1 + valorP2;
-      custo = client.qtd_ativos_p1 * config.custo_painel1;
+      custo = (client.qtd_ativos_p1 || 0) * config.custo_painel1;
     } else {
       bruto = client.valor_plano || 0;
       if (client.painel.includes('Painel 1')) {
@@ -171,8 +211,8 @@ export default function App() {
   const lucroLiquidoTotal = receitaBrutaTotal - custoTotalGeral;
 
   const filteredClients = calculatedClients.filter(c => 
-    c.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.dispositivo.toLowerCase().includes(searchTerm.toLowerCase())
+    (c.nome && c.nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
+    (c.dispositivo && c.dispositivo.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   if (loading) {
@@ -322,7 +362,20 @@ export default function App() {
               </div>
 
               <button 
-                onClick={() => { setEditingClient(null); setShowModal(true); }}
+                onClick={() => { 
+                  setEditingClient(null); 
+                  setFormData({
+                    nome: '',
+                    tipo: 'Cliente Direto',
+                    painel: 'Painel 1 (Sigma)',
+                    valor_plano: '',
+                    dispositivo: 'TV Box',
+                    observacoes: '',
+                    qtd_ativos_p1: 1,
+                    qtd_ativos_p2: 0
+                  });
+                  setShowModal(true); 
+                }}
                 className="w-full sm:w-auto flex items-center justify-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-gray-950 font-bold rounded-xl shadow-lg transition"
               >
                 <Plus className="w-5 h-5" />
@@ -375,10 +428,18 @@ export default function App() {
                           </td>
                           <td className="p-4 font-semibold text-white">R$ {client.bruto.toFixed(2)}</td>
                           <td className="p-4 font-semibold text-green-400">R$ {client.liquido.toFixed(2)}</td>
-                          <td className="p-4 text-right">
+                          <td className="p-4 text-right space-x-2">
+                            <button 
+                              onClick={() => handleOpenEdit(client)}
+                              className="p-2 bg-amber-500/15 text-amber-400 rounded-lg hover:bg-amber-500/30 transition"
+                              title="Editar"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
                             <button 
                               onClick={() => handleDelete(client.id)}
                               className="p-2 bg-red-950/40 text-red-400 rounded-lg hover:bg-red-900/50 transition"
+                              title="Excluir"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -449,7 +510,7 @@ export default function App() {
       {showModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-[#111827] border border-amber-500/40 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-6">
-            <h3 className="text-xl font-bold text-white">Novo Cadastro</h3>
+            <h3 className="text-xl font-bold text-white">{editingClient ? 'Editar Cadastro' : 'Novo Cadastro'}</h3>
 
             <form onSubmit={handleSaveClient} className="space-y-4">
               <div>
@@ -560,7 +621,7 @@ export default function App() {
                   type="submit"
                   className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-gray-950 font-bold rounded-xl"
                 >
-                  Salvar
+                  {editingClient ? 'Atualizar' : 'Salvar'}
                 </button>
               </div>
             </form>
