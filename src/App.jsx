@@ -146,10 +146,12 @@ export default function App() {
     }
   };
 
-  // ---- LÓGICA INTELIGENTE DE RATEIO E PONTO DE EQUILÍBRIO (PAINEL 2) ----
+  // ---- LÓGICA CORRIGIDA (USA O VALOR INDIVIDUAL DO PLANO OU REVENDA) ----
   const totalReceitaP2 = clients.filter(c => c.painel.includes('Painel 2')).reduce((acc, c) => {
-    const ativos = c.tipo === 'Revendedor' ? (c.qtd_ativos_p2 || 0) : 1;
-    return acc + (ativos * config.revenda_painel2);
+    if (c.tipo === 'Revendedor') {
+      return acc + ((c.qtd_ativos_p2 || 0) * config.revenda_painel2);
+    }
+    return acc + (c.valor_plano || 0);
   }, 0);
 
   const painel2Pago = totalReceitaP2 >= config.custo_painel2_fixo;
@@ -163,16 +165,24 @@ export default function App() {
     let custo = 0;
 
     if (client.painel.includes('Painel 1')) {
-      const ativos = client.tipo === 'Revendedor' ? (client.qtd_ativos_p1 || 0) : 1;
-      bruto = ativos * config.revenda_painel1;
-      custo = ativos * config.custo_painel1;
+      if (client.tipo === 'Revendedor') {
+        const ativos = client.qtd_ativos_p1 || 0;
+        bruto = ativos * config.revenda_painel1;
+        custo = ativos * config.custo_painel1;
+      } else {
+        // Cliente direto usa o valor específico digitado no campo de valor do plano
+        bruto = client.valor_plano || 0;
+        custo = config.custo_painel1;
+      }
     } else {
       // Painel 2
-      const ativos = client.tipo === 'Revendedor' ? (client.qtd_ativos_p2 || 0) : 1;
-      bruto = ativos * config.revenda_painel2;
-      
-      // Se o painel 2 já foi quitado pelas receitas, o custo deste cliente/revenda é ZERO (lucro puro)
-      // Senão, o custo absorve o saldo restante que falta pagar do fixo de R$ 200
+      if (client.tipo === 'Revendedor') {
+        const ativos = client.qtd_ativos_p2 || 0;
+        bruto = ativos * config.revenda_painel2;
+      } else {
+        bruto = client.valor_plano || 0;
+      }
+
       if (painel2Pago) {
         custo = 0;
       } else {
@@ -284,7 +294,6 @@ export default function App() {
       <main className="max-w-7xl mx-auto px-4 py-8 flex-1 w-full space-y-6">
         {activeTab === 'dashboard' ? (
           <>
-            {/* Alerta de Status do Painel 2 */}
             <div className={`p-4 rounded-2xl border flex items-center justify-between ${painel2Pago ? 'bg-green-950/30 border-green-500/50 text-green-300' : 'bg-amber-950/30 border-amber-500/50 text-amber-300'}`}>
               <div className="flex items-center space-x-3">
                 {painel2Pago ? <CheckCircle className="w-6 h-6 text-green-400" /> : <DollarSign className="w-6 h-6 text-amber-400" />}
@@ -408,7 +417,7 @@ export default function App() {
                 <input type="number" step="0.01" value={config.custo_painel1} onChange={(e) => setConfig({...config, custo_painel1: parseFloat(e.target.value) || 0})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Valor de Revenda por Ativo - Painel 1</label>
+                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Valor Padrão Revenda - Painel 1</label>
                 <input type="number" step="0.01" value={config.revenda_painel1} onChange={(e) => setConfig({...config, revenda_painel1: parseFloat(e.target.value) || 0})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
               </div>
               <div>
@@ -416,7 +425,7 @@ export default function App() {
                 <input type="number" step="0.01" value={config.custo_painel2_fixo} onChange={(e) => setConfig({...config, custo_painel2_fixo: parseFloat(e.target.value) || 0})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Valor Cobrado por Ativo - Painel 2 (Revenda/Plano)</label>
+                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Valor Padrão Revenda - Painel 2</label>
                 <input type="number" step="0.01" value={config.revenda_painel2} onChange={(e) => setConfig({...config, revenda_painel2: parseFloat(e.target.value) || 0})} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
               </div>
             </div>
