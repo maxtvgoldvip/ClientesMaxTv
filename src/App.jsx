@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
-import { Tv, DollarSign, Plus, Settings, LogOut, Trash2, Edit2, Search, CheckCircle, Calendar } from 'lucide-react';
+import { Tv, DollarSign, Plus, Settings, LogOut, Trash2, Edit2, Search, CheckCircle } from 'lucide-react';
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -10,7 +10,6 @@ export default function App() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [isReset, setIsReset] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-
   const [activeTab, setActiveTab] = useState('dashboard');
   const [clients, setClients] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -38,7 +37,6 @@ export default function App() {
       if (session) fetchAppData(session.user.id);
       setLoading(false);
     });
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
       if (session) fetchAppData(session.user.id);
@@ -50,7 +48,6 @@ export default function App() {
   const fetchAppData = async (userId) => {
     const { data: clientData } = await supabase.from('clientes_max').select('*').eq('user_id', userId);
     if (clientData) setClients(clientData);
-
     const { data: configData } = await supabase.from('config_max').select('*').eq('user_id', userId).maybeSingle();
     if (configData) {
       setConfig({
@@ -64,20 +61,30 @@ export default function App() {
   };
 
   const handleSaveConfig = async () => {
-    const payload = { 
-        user_id: session.user.id, 
-        custo_painel1: config.custo_painel1, 
-        revenda_painel1: config.revenda_painel1, 
-        revenda_painel2: config.revenda_painel2, 
-        custo_painel2_fixo: config.custo_painel2_fixo 
-    };
-    await supabase.from('config_max').upsert(payload, { onConflict: 'user_id' });
-    alert('Salvo!');
+    await supabase.from('config_max').upsert({ 
+        user_id: session.user.id, ...config 
+    }, { onConflict: 'user_id' });
+    alert('Configurações salvas!');
+    fetchAppData(session.user.id);
   };
 
-  // Lógica de Bloqueio por Vencimento
-  const dataVenc = new Date(config.data_vencimento);
-  const estaVencido = !isAdmin && new Date() > dataVenc;
+  const handleSaveClient = async (e) => {
+    e.preventDefault();
+    const p1 = parseInt(formData.qtd_ativos_p1) || 0;
+    const p2 = parseInt(formData.qtd_ativos_p2) || 0;
+    const bruto = formData.tipo === 'Revendedor' ? (p1 * config.revenda_painel1) + (p2 * config.revenda_painel2) : parseFloat(formData.valor_plano) || 0;
+
+    const payload = { user_id: session.user.id, ...formData, valor_plano: bruto, qtd_ativos_p1: p1, qtd_ativos_p2: p2 };
+    
+    if (editingClient) await supabase.from('clientes_max').update(payload).eq('id', editingClient.id);
+    else await supabase.from('clientes_max').insert([payload]);
+    
+    setShowModal(false);
+    fetchAppData(session.user.id);
+  };
+
+  // LÓGICA DE BLOQUEIO (ADMIN SEMPRE TEM ACESSO)
+  const estaVencido = !isAdmin && (new Date() > new Date(config.data_vencimento));
 
   if (loading) return <div className="text-amber-400 p-10">Carregando...</div>;
 
@@ -86,24 +93,34 @@ export default function App() {
       <div className="min-h-screen bg-[#0b0f19] flex items-center justify-center p-6 text-center">
         <div className="bg-[#111827] border border-red-500/50 p-8 rounded-2xl shadow-2xl">
           <h2 className="text-2xl font-bold text-red-500 mb-4">Assinatura Vencida!</h2>
-          <p className="text-gray-300">Venceu em: {dataVenc.toLocaleDateString()}</p>
-          <p className="text-gray-400">Renove sua mensalidade de R$ 3,00 para continuar.</p>
+          <p className="text-gray-300">Renove sua mensalidade de R$ 3,00 para continuar.</p>
         </div>
       </div>
     );
   }
 
-  // Se não estiver logado, exibe tela de login (mantenha sua lógica de Auth aqui...)
-  if (!session) return <div>(Sua tela de Login aqui)</div>;
+  if (!session) return <div className="p-10 text-white">Redirecionando para Login...</div>;
 
-  // ... (restante do código com a lógica de Dashboard e Modal de Clientes como discutido)
   return (
     <div className="min-h-screen bg-[#0b0f19] text-gray-100 flex flex-col">
-        {/* Adicione o cabeçalho com a data de vencimento visível */}
-        <div className="text-right p-2 text-xs text-amber-500">
-            Vencimento: {dataVenc.toLocaleDateString()}
+      <header className="bg-[#111827] border-b border-gray-800 p-4 flex justify-between items-center">
+        <h1 className="text-xl font-bold">MAX TV <span className="text-amber-400">GOLD VIP</span></h1>
+        <div className="space-x-4">
+          <button onClick={() => setActiveTab('dashboard')}>Painel</button>
+          <button onClick={() => setActiveTab('config')}>Configurações</button>
         </div>
-        {/* ... restante da interface */}
+      </header>
+      <main className="p-6 max-w-7xl mx-auto w-full">
+        {activeTab === 'dashboard' ? (
+          <div>Dashboard (Seus dados e tabelas aqui)</div>
+        ) : (
+          <div className="bg-[#111827] p-6 rounded-2xl max-w-lg mx-auto">
+            <h2 className="text-white font-bold mb-4">Configurações</h2>
+            {/* Campos de Input (Custo, Venda, etc) */}
+            <button onClick={handleSaveConfig} className="bg-amber-500 w-full py-2 rounded-xl mt-4">Salvar</button>
+          </div>
+        )}
+      </main>
     </div>
   );
 }
