@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
-import { Tv, DollarSign, Plus, Settings, LogOut, Trash2, Edit2, Search, CheckCircle } from 'lucide-react';
+import { Tv, DollarSign, Plus, Settings, LogOut, Trash2, Edit2, Search, CheckCircle, Calendar, Users } from 'lucide-react';
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -9,6 +9,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
   const [clients, setClients] = useState([]);
+  const [allResellersConfig, setAllResellersConfig] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
@@ -25,26 +26,29 @@ export default function App() {
   });
 
   const [formData, setFormData] = useState({
-    nome: '',
-    tipo: 'Cliente Direto',
-    painel: 'Painel 1 (Sigma)',
-    valor_plano: '',
-    dispositivo: 'TV Box',
-    observacoes: '',
-    qtd_ativos_p1: 1,
-    qtd_ativos_p2: 0
+    nome: '', tipo: 'Cliente Direto', painel: 'Painel 1 (Sigma)', valor_plano: '', dispositivo: 'TV Box', observacoes: '', qtd_ativos_p1: 1, qtd_ativos_p2: 0
   });
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) fetchAppData(session.user.id);
+      if (session) {
+        fetchAppData(session.user.id);
+        if (admins.includes(session.user.email)) {
+          fetchAllResellers();
+        }
+      }
       setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
-      if (session) fetchAppData(session.user.id);
+      if (session) {
+        fetchAppData(session.user.id);
+        if (admins.includes(session.user.email)) {
+          fetchAllResellers();
+        }
+      }
       setLoading(false);
     });
     return () => subscription.unsubscribe();
@@ -70,6 +74,29 @@ export default function App() {
     }
   };
 
+  const fetchAllResellers = async () => {
+    // Busca todas as configurações de revendedores para o Admin gerenciar
+    const { data } = await supabase.from('config_max').select('*');
+    if (data) setAllResellersConfig(data);
+  };
+
+  const handleRenewReseller = async (userId) => {
+    // Adiciona 30 dias à data atual ou à data de vencimento existente
+    const novaData = new Date();
+    novaData.setDate(novaData.getDate() + 30);
+
+    const { error } = await supabase.from('config_max').update({ 
+      data_vencimento: novaData.toISOString() 
+    }).eq('user_id', userId);
+
+    if (error) {
+      alert('Erro ao renovar: ' + error.message);
+    } else {
+      alert('Assinatura renovada por mais 30 dias com sucesso!');
+      fetchAllResellers();
+    }
+  };
+
   const handleAuth = async (e) => {
     e.preventDefault();
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -88,10 +115,7 @@ export default function App() {
 
     const { error } = await supabase.from('config_max').upsert(payload, { onConflict: 'user_id' });
     if (error) alert('Erro ao salvar: ' + error.message);
-    else {
-      alert('Configurações salvas com sucesso!');
-      fetchAppData(session.user.id);
-    }
+    else alert('Configurações salvas com sucesso!');
   };
 
   const handleOpenEdit = (client) => {
@@ -133,37 +157,26 @@ export default function App() {
     };
 
     if (editingClient) {
-      const { error } = await supabase.from('clientes_max').update(payload).eq('id', editingClient.id);
-      if (error) alert('Erro: ' + error.message);
-      else setClients(clients.map(c => c.id === editingClient.id ? { ...payload, id: c.id } : c));
+      await supabase.from('clientes_max').update(payload).eq('id', editingClient.id);
+      setClients(clients.map(c => c.id === editingClient.id ? { ...payload, id: c.id } : c));
       setEditingClient(null);
     } else {
-      const { data, error } = await supabase.from('clientes_max').insert([payload]).select();
-      if (error) alert('Erro: ' + error.message);
-      else if (data) setClients([data[0], ...clients]);
+      const { data } = await supabase.from('clientes_max').insert([payload]).select();
+      if (data) setClients([data[0], ...clients]);
     }
-
     setShowModal(false);
-    setFormData({
-      nome: '', tipo: 'Cliente Direto', painel: 'Painel 1 (Sigma)', valor_plano: '', dispositivo: 'TV Box', observacoes: '', qtd_ativos_p1: 1, qtd_ativos_p2: 0
-    });
   };
 
   const handleDelete = async (id) => {
-    if (confirm('Deseja realmente excluir este cadastro?')) {
-      const { error } = await supabase.from('clientes_max').delete().eq('id', id);
-      if (error) alert('Erro: ' + error.message);
-      else setClients(clients.filter(c => c.id !== id));
+    if (confirm('Deseja excluir?')) {
+      await supabase.from('clientes_max').delete().eq('id', id);
+      setClients(clients.filter(c => c.id !== id));
     }
   };
 
-  // Cálculos financeiros
   const totalReceitaP2 = clients.reduce((acc, c) => {
-    if (c.tipo === 'Revendedor') {
-      return acc + ((c.qtd_ativos_p2 || 0) * config.revenda_painel2);
-    } else if (c.painel.includes('Painel 2')) {
-      return acc + (c.valor_plano || 0);
-    }
+    if (c.tipo === 'Revendedor') return acc + ((c.qtd_ativos_p2 || 0) * config.revenda_painel2);
+    else if (c.painel.includes('Painel 2')) return acc + (c.valor_plano || 0);
     return acc;
   }, 0);
 
@@ -174,56 +187,36 @@ export default function App() {
   let custoTotalGeral = 0;
 
   const calculatedClients = clients.map(client => {
-    let bruto = 0;
-    let custo = 0;
-
+    let bruto = 0, custo = 0;
     if (client.tipo === 'Revendedor') {
       const p1 = client.qtd_ativos_p1 || 0;
       const p2 = client.qtd_ativos_p2 || 0;
       bruto = (p1 * config.revenda_painel1) + (p2 * config.revenda_painel2);
-      custo = p1 * config.custo_painel1; 
+      custo = p1 * config.custo_painel1;
     } else {
       bruto = client.valor_plano || 0;
-      if (client.painel.includes('Painel 1')) {
-        custo = config.custo_painel1;
-      } else {
-        if (isAdmin) {
-          custo = painel2Pago ? 0 : Math.min(bruto, saldoP2Restante);
-        }
-      }
+      if (client.painel.includes('Painel 1')) custo = config.custo_painel1;
+      else if (isAdmin) custo = painel2Pago ? 0 : Math.min(bruto, saldoP2Restante);
     }
-
-    const liquido = bruto - custo;
     receitaBrutaTotal += bruto;
     custoTotalGeral += custo;
-
-    return { ...client, bruto, liquido, custo };
+    return { ...client, bruto, liquido: bruto - custo, custo };
   });
 
   const lucroLiquidoTotal = receitaBrutaTotal - custoTotalGeral;
-
-  const filteredClients = calculatedClients.filter(c => 
-    (c.nome && c.nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    (c.dispositivo && c.dispositivo.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  const filteredClients = calculatedClients.filter(c => c.nome?.toLowerCase().includes(searchTerm.toLowerCase()));
 
   // Trava de vencimento (Admin NUNCA é bloqueado)
   const estaVencido = !isAdmin && (new Date() > new Date(config.data_vencimento));
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#0b0f19] flex items-center justify-center text-amber-400">
-        <div className="animate-pulse text-xl font-semibold">Carregando MAX TV...</div>
-      </div>
-    );
-  }
+  if (loading) return <div className="min-h-screen bg-[#0b0f19] flex items-center justify-center text-amber-400">Carregando...</div>;
 
   if (session && estaVencido) {
     return (
       <div className="min-h-screen bg-[#0b0f19] flex items-center justify-center p-6 text-center">
         <div className="bg-[#111827] border border-red-500/50 p-8 rounded-2xl shadow-2xl">
           <h2 className="text-2xl font-bold text-red-500 mb-4">Assinatura Vencida!</h2>
-          <p className="text-gray-300">Entre em contato com o suporte para renovar o acesso.</p>
+          <p className="text-gray-300">Sua mensalidade de R$ 3,00 expirou. Entre em contato com o administrador para renovar.</p>
         </div>
       </div>
     );
@@ -232,20 +225,12 @@ export default function App() {
   if (!session) {
     return (
       <div className="min-h-screen bg-[#0b0f19] flex flex-col items-center justify-center p-4">
-        <div className="w-full max-w-md bg-[#111827] border border-amber-500/30 rounded-2xl shadow-2xl p-8">
-          <div className="text-center mb-6">
-            <h1 className="text-2xl font-bold text-white">MAX TV <span className="text-amber-400">GOLD VIP</span></h1>
-          </div>
+        <div className="w-full max-w-md bg-[#111827] border border-amber-500/30 rounded-2xl p-8 shadow-2xl">
+          <h1 className="text-2xl font-bold text-white text-center mb-6">MAX TV <span className="text-amber-400">GOLD VIP</span></h1>
           <form onSubmit={handleAuth} className="space-y-4">
-            <div>
-              <label className="block text-xs text-gray-300 uppercase mb-1">E-mail</label>
-              <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
-            </div>
-            <div>
-              <label className="block text-xs text-gray-300 uppercase mb-1">Senha</label>
-              <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white" />
-            </div>
-            <button type="submit" className="w-full py-3 bg-amber-500 text-gray-950 font-bold rounded-xl">Entrar no Sistema</button>
+            <input type="email" required placeholder="E-mail" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-4 py-3 bg-[#1f2937] rounded-xl text-white" />
+            <input type="password" required placeholder="Senha" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-4 py-3 bg-[#1f2937] rounded-xl text-white" />
+            <button type="submit" className="w-full py-3 bg-amber-500 text-gray-950 font-bold rounded-xl">Entrar</button>
           </form>
         </div>
       </div>
@@ -262,6 +247,14 @@ export default function App() {
           </div>
           <div className="flex items-center space-x-3">
             <button onClick={() => setActiveTab('dashboard')} className={`px-4 py-2 rounded-xl text-sm ${activeTab === 'dashboard' ? 'bg-amber-500 text-gray-950 font-semibold' : 'bg-[#1f2937] text-gray-300'}`}>Painel</button>
+            
+            {isAdmin && (
+              <button onClick={() => setActiveTab('revendedores')} className={`px-4 py-2 rounded-xl text-sm flex items-center space-x-1 ${activeTab === 'revendedores' ? 'bg-amber-500 text-gray-950 font-semibold' : 'bg-[#1f2937] text-gray-300'}`}>
+                <Users className="w-4 h-4" />
+                <span>Revendedores</span>
+              </button>
+            )}
+
             <button onClick={() => setActiveTab('config')} className={`px-4 py-2 rounded-xl text-sm flex items-center space-x-1 ${activeTab === 'config' ? 'bg-amber-500 text-gray-950 font-semibold' : 'bg-[#1f2937] text-gray-300'}`}>
               <Settings className="w-4 h-4" />
               <span>Configurações</span>
@@ -327,9 +320,7 @@ export default function App() {
                       <tr key={client.id} className="hover:bg-[#1f2937]/30">
                         <td className="p-4 font-medium text-white">{client.nome}<br/><span className="text-xs text-purple-400">{client.tipo}</span></td>
                         <td className="p-4 text-gray-300">{client.painel}</td>
-                        <td className="p-4 text-gray-300 text-xs">
-                          {client.tipo === 'Revendedor' ? `P1: ${client.qtd_ativos_p1} | P2: ${client.qtd_ativos_p2}` : client.dispositivo}
-                        </td>
+                        <td className="p-4 text-gray-300 text-xs">{client.tipo === 'Revendedor' ? `P1: ${client.qtd_ativos_p1} | P2: ${client.qtd_ativos_p2}` : client.dispositivo}</td>
                         <td className="p-4 font-semibold text-white">R$ {client.bruto.toFixed(2)}</td>
                         <td className="p-4 font-semibold text-green-400">R$ {client.liquido.toFixed(2)}</td>
                         <td className="p-4 text-right space-x-2">
@@ -343,6 +334,43 @@ export default function App() {
               </table>
             </div>
           </>
+        ) : activeTab === 'revendedores' && isAdmin ? (
+          <div className="bg-[#111827] border border-amber-500/30 rounded-2xl p-6 shadow-xl space-y-6">
+            <h2 className="text-xl font-bold text-white flex items-center space-x-2"><Users className="w-6 h-6 text-amber-400" /><span>Gestão de Vencimentos dos Revendedores</span></h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-[#1f2937]/50 border-b border-gray-800 text-xs uppercase text-gray-400">
+                    <th className="p-4">ID do Usuário / Revenda</th>
+                    <th className="p-4">Vencimento Atual</th>
+                    <th className="p-4">Status</th>
+                    <th className="p-4 text-right">Ação</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800 text-sm">
+                  {allResellersConfig.map((res) => {
+                    const vencido = new Date() > new Date(res.data_vencimento);
+                    return (
+                      <tr key={res.id} className="hover:bg-[#1f2937]/30">
+                        <td className="p-4 font-mono text-xs text-gray-300">{res.user_id}</td>
+                        <td className="p-4 text-gray-300">{new Date(res.data_vencimento).toLocaleDateString()}</td>
+                        <td className="p-4">
+                          <span className={`px-2.5 py-1 text-xs rounded-full font-bold ${vencido ? 'bg-red-950 text-red-400 border border-red-800' : 'bg-green-950 text-green-400 border border-green-800'}`}>
+                            {vencido ? 'VENCIDO' : 'ATIVO'}
+                          </span>
+                        </td>
+                        <td className="p-4 text-right">
+                          <button onClick={() => handleRenewReseller(res.user_id)} className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 text-gray-950 font-bold rounded-xl text-xs shadow-lg">
+                            Renovar +30 Dias
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
         ) : (
           <div className="bg-[#111827] border border-amber-500/30 rounded-2xl p-6 max-w-2xl mx-auto space-y-6">
             <h2 className="text-xl font-bold text-white flex items-center space-x-2"><Settings className="w-6 h-6 text-amber-400" /><span>Configurações</span></h2>
