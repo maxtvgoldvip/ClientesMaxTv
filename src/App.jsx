@@ -369,7 +369,7 @@ export default function App() {
                             ) : (
                               <div>
                                 <div>{client.dispositivo}</div>
-                                <div className="text-gray-500 italic">{client.observacoes || 'Sem obs'}</div>
+                                <div className="text-amber-400/90 italic mt-0.5">{client.observacoes || 'Sem obs'}</div>
                               </div>
                             )}
                           </td>
@@ -532,6 +532,17 @@ export default function App() {
                       value={formData.dispositivo}
                       onChange={(e) => setFormData({...formData, dispositivo: e.target.value})}
                       className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white"
+                      placeholder="TV Box, Smart TV, Celular..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Observações</label>
+                    <input 
+                      type="text" 
+                      value={formData.observacoes}
+                      onChange={(e) => setFormData({...formData, observacoes: e.target.value})}
+                      className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white"
+                      placeholder="Ex: Vencimento dia 10..."
                     />
                   </div>
                 </>
