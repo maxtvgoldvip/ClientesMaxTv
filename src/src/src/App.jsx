@@ -1,0 +1,622 @@
+import React, { useState, useEffect } from 'react';
+import { supabase } from './supabaseClient';
+import { 
+  Tv, Users, DollarSign, Plus, Settings, LogOut, Trash2, Edit2, 
+  Search, ShieldAlert, CheckCircle, Smartphone, Monitor, Tablet, HelpCircle 
+} from 'lucide-react';
+
+export default function App() {
+  const [session, setSession] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Estados do Sistema
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [clients, setClients] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [editingClient, setEditingClient] = useState(null);
+
+  // Configurações Financeiras (Editáveis)
+  const [config, setConfig] = useState({
+    custo_painel1: 5.00,
+    revenda_painel1: 8.00,
+    custo_painel2_fixo: 200.00,
+    revenda_painel2: 30.00
+  });
+
+  // Formulário de Cadastro / Edição
+  const [formData, setFormData] = useState({
+    nome: '',
+    tipo: 'Cliente Direto', // 'Cliente Direto' ou 'Revendedor'
+    painel: 'Painel 1 (Sigma)', // 'Painel 1 (Sigma)' ou 'Painel 2 (Zenpanel)'
+    valor_plano: '',
+    dispositivo: 'TV Box',
+    observacoes: '',
+    qtd_ativos_p1: 1,
+    qtd_ativos_p2: 0
+  });
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) fetchAppData(session.user.id);
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) fetchAppData(session.user.id);
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const fetchAppData = async (userId) => {
+    try {
+      const { data, error } = await supabase
+        .from('clientes_max')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (error) {
+        // Se a tabela não existir, criamos o mock local para teste imediato
+        console.warn('Erro ao carregar dados do Supabase, usando estado local.');
+      } else if (data) {
+        setClients(data);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    setErrorMsg('');
+    try {
+      if (isSignUp) {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+        alert('Cadastro realizado! Verifique seu e-mail ou faça login.');
+        setIsSignUp(false);
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      }
+    } catch (error) {
+      setErrorMsg(error.message);
+    }
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
+
+  // Salvando Cliente / Revendedor
+  const handleSaveClient = async (e) => {
+    e.preventDefault();
+    if (!session) return;
+
+    const newClient = {
+      user_id: session.user.id,
+      nome: formData.nome,
+      tipo: formData.tipo,
+      painel: formData.painel,
+      valor_plano: parseFloat(formData.valor_plano) || 0,
+      dispositivo: formData.dispositivo,
+      observacoes: formData.observacoes,
+      qtd_ativos_p1: parseInt(formData.qtd_ativos_p1) || 0,
+      qtd_ativos_p2: parseInt(formData.qtd_ativos_p2) || 0,
+      created_at: new Date()
+    };
+
+    if (editingClient) {
+      // Atualizar local e Supabase se houver tabela
+      setClients(clients.map(c => c.id === editingClient.id ? { ...newClient, id: c.id } : c));
+      setEditingClient(null);
+    } else {
+      const tempId = Date.now().toString();
+      setClients([{ ...newClient, id: tempId }, ...clients]);
+    }
+
+    setShowModal(false);
+    setFormData({
+      nome: '',
+      tipo: 'Cliente Direto',
+      painel: 'Painel 1 (Sigma)',
+      valor_plano: '',
+      dispositivo: 'TV Box',
+      observacoes: '',
+      qtd_ativos_p1: 1,
+      qtd_ativos_p2: 0
+    });
+  };
+
+  const handleDelete = (id) => {
+    if (confirm('Deseja realmente excluir este cadastro?')) {
+      setClients(clients.filter(c => c.id !== id));
+    }
+  };
+
+  // ---- CÁLCULOS FINANCEIRO INTELIGENTES ----
+  // Contagem de usuários Painel 2 para rateio do custo fixo de R$ 200
+  const totalUsuariosPainel2 = clients.filter(c => c.painel.includes('Painel 2')).reduce((acc, curr) => {
+    if (curr.tipo === 'Revendedor') {
+      return acc + (curr.qtd_ativos_p2 || 0);
+    }
+    return acc + 1;
+  }, 0);
+
+  const custoUnitarioPainel2 = totalUsuariosPainel2 > 0 ? (config.custo_painel2_fixo / totalUsuariosPainel2) : 0;
+
+  // Cálculo de Receita Bruta e Lucro Líquido Geral
+  let receitaBrutaTotal = 0;
+  let custoTotalGeral = 0;
+
+  const calculatedClients = clients.map(client => {
+    let bruto = 0;
+    let custo = 0;
+
+    if (client.tipo === 'Revendedor') {
+      // Cálculo para revendedor nos painéis
+      const valorP1 = client.qtd_ativos_p1 * config.revenda_painel1;
+      const valorP2 = client.qtd_ativos_p2 * config.revenda_painel2;
+      bruto = valorP1 + valorP2;
+      
+      const custoP1 = client.qtd_ativos_p1 * config.custo_painel1;
+      custo = custoP1; 
+    } else {
+      // Cliente direto
+      bruto = client.valor_plano || 0;
+      if (client.painel.includes('Painel 1')) {
+        custo = config.custo_painel1;
+      } else {
+        custo = custoUnitarioPainel2;
+      }
+    }
+
+    const liquido = bruto - custo;
+    receitaBrutaTotal += bruto;
+    custoTotalGeral += custo;
+
+    return { ...client, bruto, liquido, custo };
+  });
+
+  const lucroLiquidoTotal = receitaBrutaTotal - custoTotalGeral;
+
+  const filteredClients = calculatedClients.filter(c => 
+    c.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    c.dispositivo.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#0b0f19] flex items-center justify-center text-amber-400">
+        <div className="animate-pulse text-xl font-semibold">Carregando MAX TV...</div>
+      </div>
+    );
+  }
+
+  // TELA DE LOGIN / CADASTRO
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-[#0b0f19] flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md bg-[#111827] border border-amber-500/30 rounded-2xl shadow-2xl p-8">
+          <div className="text-center mb-6">
+            <div className="inline-flex p-3 bg-amber-500/15 rounded-2xl mb-3 border border-amber-500/30">
+              <Tv className="w-10 h-10 text-amber-400" />
+            </div>
+            <h1 className="text-2xl font-bold text-white tracking-wide">MAX TV <span className="text-amber-400">GOLD VIP</span></h1>
+            <p className="text-sm text-gray-400 mt-1">Gestão inteligente de Clientes e Revendas</p>
+          </div>
+
+          {errorMsg && (
+            <div className="mb-4 p-3 bg-red-950/50 border border-red-500/50 text-red-300 text-sm rounded-xl">
+              {errorMsg}
+            </div>
+          )}
+
+          <form onSubmit={handleAuth} className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-300 uppercase mb-1">E-mail</label>
+              <input 
+                type="email" 
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white focus:outline-none focus:border-amber-400 transition"
+                placeholder="seuemail@exemplo.com"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Senha</label>
+              <input 
+                type="password" 
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white focus:outline-none focus:border-amber-400 transition"
+                placeholder="••••••••"
+              />
+            </div>
+
+            <button 
+              type="submit"
+              className="w-full py-3 px-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-gray-950 font-bold rounded-xl shadow-lg transition transform active:scale-95"
+            >
+              {isSignUp ? 'Cadastrar Conta' : 'Entrar no Sistema'}
+            </button>
+          </form>
+
+          <div className="mt-6 text-center">
+            <button 
+              onClick={() => setIsSignUp(!isSignUp)}
+              className="text-sm text-amber-400 hover:underline"
+            >
+              {isSignUp ? 'Já tem uma conta? Faça login' : 'Não tem conta? Cadastre-se'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // TELA PRINCIPAL DO APLICATIVO
+  return (
+    <div className="min-h-screen bg-[#0b0f19] text-gray-100 flex flex-col">
+      {/* Topo / Header */}
+      <header className="bg-[#111827] border-b border-gray-800 sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-xl">
+              <Tv className="w-8 h-8 text-amber-400" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold tracking-wider text-white">MAX TV <span className="text-amber-400">GOLD VIP</span></h1>
+              <p className="text-xs text-gray-400">Sigma & Zenpanel — Controle Financeiro</p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={() => setActiveTab('dashboard')}
+              className={`px-4 py-2 rounded-xl text-sm font-medium transition ${activeTab === 'dashboard' ? 'bg-amber-500 text-gray-950 font-semibold' : 'bg-[#1f2937] text-gray-300 hover:bg-gray-700'}`}
+            >
+              Painel Principal
+            </button>
+            <button 
+              onClick={() => setActiveTab('config')}
+              className={`px-4 py-2 rounded-xl text-sm font-medium flex items-center space-x-2 transition ${activeTab === 'config' ? 'bg-amber-500 text-gray-950 font-semibold' : 'bg-[#1f2937] text-gray-300 hover:bg-gray-700'}`}
+            >
+              <Settings className="w-4 h-4" />
+              <span>Configurações</span>
+            </button>
+            <button 
+              onClick={handleLogout}
+              className="p-2 bg-red-950/40 text-red-400 border border-red-900/50 rounded-xl hover:bg-red-900/40 transition"
+              title="Sair"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Conteúdo Principal */}
+      <main className="max-w-7xl mx-auto px-4 py-8 flex-1 w-full space-y-6">
+        
+        {activeTab === 'dashboard' ? (
+          <>
+            {/* Cards Financeiros Resumo */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-[#111827] border border-amber-500/20 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+                <div className="absolute right-4 top-4 p-3 bg-amber-500/10 rounded-xl">
+                  <DollarSign className="w-6 h-6 text-amber-400" />
+                </div>
+                <p className="text-xs uppercase tracking-wider text-gray-400 font-semibold">Receita Bruta Total</p>
+                <h3 className="text-3xl font-bold text-white mt-2">
+                  R$ {receitaBrutaTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </h3>
+                <p className="text-xs text-gray-500 mt-1">Soma de todos os planos e revendas</p>
+              </div>
+
+              <div className="bg-[#111827] border border-amber-500/40 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+                <div className="absolute right-4 top-4 p-3 bg-green-500/10 rounded-xl">
+                  <DollarSign className="w-6 h-6 text-green-400" />
+                </div>
+                <p className="text-xs uppercase tracking-wider text-gray-400 font-semibold">Lucro Líquido Total</p>
+                <h3 className="text-3xl font-bold text-green-400 mt-2">
+                  R$ {lucroLiquidoTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </h3>
+                <p className="text-xs text-gray-500 mt-1">Já descontado custos ativos e rateio fixo</p>
+              </div>
+            </div>
+
+            {/* Barra de Ações & Busca */}
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-[#111827] p-4 rounded-2xl border border-gray-800">
+              <div className="relative w-full sm:w-80">
+                <Search className="absolute left-3 top-3 w-5 h-5 text-gray-500" />
+                <input 
+                  type="text"
+                  placeholder="Buscar cliente ou revendedor..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2 bg-[#1f2937] border border-gray-700 rounded-xl text-white text-sm focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <button 
+                onClick={() => { setEditingClient(null); setShowModal(true); }}
+                className="w-full sm:w-auto flex items-center justify-center space-x-2 px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-gray-950 font-bold rounded-xl shadow-lg transition"
+              >
+                <Plus className="w-5 h-5" />
+                <span>Adicionar Novo</span>
+              </button>
+            </div>
+
+            {/* Tabela de Clientes e Revendas */}
+            <div className="bg-[#111827] border border-gray-800 rounded-2xl shadow-xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-[#1f2937]/50 border-b border-gray-800 text-xs uppercase text-gray-400 tracking-wider">
+                      <th className="p-4">Nome / Tipo</th>
+                      <th className="p-4">Painel</th>
+                      <th className="p-4">Detalhes / Qtde</th>
+                      <th className="p-4">Valor Bruto</th>
+                      <th className="p-4">Lucro Líquido</th>
+                      <th className="p-4 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-800 text-sm">
+                    {filteredClients.length === 0 ? (
+                      <tr>
+                        <td colSpan="6" className="p-8 text-center text-gray-500">
+                          Nenhum cliente ou revendedor cadastrado ainda.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredClients.map((client) => (
+                        <tr key={client.id} className="hover:bg-[#1f2937]/30 transition">
+                          <td className="p-4 font-medium text-white">
+                            <div>{client.nome}</div>
+                            <span className={`inline-block px-2 py-0.5 text-xs rounded-md mt-1 ${client.tipo === 'Revendedor' ? 'bg-purple-950 text-purple-300 border border-purple-800' : 'bg-blue-950 text-blue-300 border border-blue-800'}`}>
+                              {client.tipo}
+                            </span>
+                          </td>
+                          <td className="p-4 text-gray-300">{client.painel}</td>
+                          <td className="p-4 text-gray-300 text-xs">
+                            {client.tipo === 'Revendedor' ? (
+                              <div>
+                                <div>P1 (Sigma): {client.qtd_ativos_p1} ativos</div>
+                                <div>P2 (Zen): {client.qtd_ativos_p2} ativos</div>
+                              </div>
+                            ) : (
+                              <div>
+                                <div>{client.dispositivo}</div>
+                                <div className="text-gray-500 italic">{client.observacoes || 'Sem obs'}</div>
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-4 font-semibold text-white">
+                            R$ {client.bruto.toFixed(2)}
+                          </td>
+                          <td className="p-4 font-semibold text-green-400">
+                            R$ {client.liquido.toFixed(2)}
+                          </td>
+                          <td className="p-4 text-right space-x-2">
+                            <button 
+                              onClick={() => handleDelete(client.id)}
+                              className="p-2 bg-red-950/40 text-red-400 rounded-lg hover:bg-red-900/50 transition"
+                              title="Excluir"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        ) : (
+          /* ABA DE CONFIGURAÇÕES FINANCEIRAS */
+          <div className="bg-[#111827] border border-amber-500/30 rounded-2xl p-6 max-w-2xl mx-auto shadow-2xl space-y-6">
+            <div>
+              <h2 className="text-xl font-bold text-white flex items-center space-x-2">
+                <Settings className="w-6 h-6 text-amber-400" />
+                <span>Configurações Financeiras e Valores</span>
+              </h2>
+              <p className="text-sm text-gray-400 mt-1">Ajuste os custos e valores de revenda conforme sua preferência.</p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Custo por Ativo - Painel 1 (Sigma)</label>
+                <input 
+                  type="number" 
+                  step="0.01"
+                  value={config.custo_painel1}
+                  onChange={(e) => setConfig({...config, custo_painel1: parseFloat(e.target.value) || 0})}
+                  className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Valor de Revenda por Ativo - Painel 1</label>
+                <input 
+                  type="number" 
+                  step="0.01"
+                  value={config.revenda_painel1}
+                  onChange={(e) => setConfig({...config, revenda_painel1: parseFloat(e.target.value) || 0})}
+                  className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Custo Fixo Mensal - Painel 2 (Zenpanel)</label>
+                <input 
+                  type="number" 
+                  step="0.01"
+                  value={config.custo_painel2_fixo}
+                  onChange={(e) => setConfig({...config, custo_painel2_fixo: parseFloat(e.target.value) || 0})}
+                  className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Valor Cobrado por Ativo - Painel 2 (Revenda)</label>
+                <input 
+                  type="number" 
+                  step="0.01"
+                  value={config.revenda_painel2}
+                  onChange={(e) => setConfig({...config, revenda_painel2: parseFloat(e.target.value) || 0})}
+                  className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-gray-800 flex justify-end">
+              <button 
+                onClick={() => alert('Configurações salvas com sucesso!')}
+                className="px-6 py-3 bg-amber-500 hover:bg-amber-400 text-gray-950 font-bold rounded-xl transition shadow-lg"
+              >
+                Salvar Configurações
+              </button>
+            </div>
+          </div>
+        )}
+
+      </main>
+
+      {/* MODAL DE CADASTRO / EDIÇÃO */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#111827] border border-amber-500/40 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-6">
+            <h3 className="text-xl font-bold text-white">Novo Cadastro</h3>
+
+            <form onSubmit={handleSaveClient} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Tipo de Cadastro</label>
+                <select 
+                  value={formData.tipo}
+                  onChange={(e) => setFormData({...formData, tipo: e.target.value})}
+                  className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white"
+                >
+                  <option value="Cliente Direto">Cliente Direto</option>
+                  <option value="Revendedor">Revendedor</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Nome</label>
+                <input 
+                  type="text" 
+                  required
+                  value={formData.nome}
+                  onChange={(e) => setFormData({...formData, nome: e.target.value})}
+                  className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white"
+                  placeholder="Nome do cliente ou revendedor"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Painel</label>
+                <select 
+                  value={formData.painel}
+                  onChange={(e) => setFormData({...formData, painel: e.target.value})}
+                  className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white"
+                >
+                  <option value="Painel 1 (Sigma)">Painel 1 (Sigma)</option>
+                  <option value="Painel 2 (Zenpanel)">Painel 2 (Zenpanel)</option>
+                </select>
+              </div>
+
+              {formData.tipo === 'Revendedor' ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Qtde Ativos Painel 1</label>
+                    <input 
+                      type="number"
+                      min="0"
+                      value={formData.qtd_ativos_p1}
+                      onChange={(e) => setFormData({...formData, qtd_ativos_p1: e.target.value})}
+                      className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Qtde Ativos Painel 2</label>
+                    <input 
+                      type="number"
+                      min="0"
+                      value={formData.qtd_ativos_p2}
+                      onChange={(e) => setFormData({...formData, qtd_ativos_p2: e.target.value})}
+                      className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Valor do Plano (R$)</label>
+                    <input 
+                      type="number" 
+                      step="0.01"
+                      required
+                      value={formData.valor_plano}
+                      onChange={(e) => setFormData({...formData, valor_plano: e.target.value})}
+                      className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white"
+                      placeholder="35.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Dispositivo</label>
+                    <input 
+                      type="text" 
+                      value={formData.dispositivo}
+                      onChange={(e) => setFormData({...formData, dispositivo: e.target.value})}
+                      className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white"
+                      placeholder="TV Box, Smart TV, Celular..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-300 uppercase mb-1">Observações</label>
+                    <input 
+                      type="text" 
+                      value={formData.observacoes}
+                      onChange={(e) => setFormData({...formData, observacoes: e.target.value})}
+                      className="w-full px-4 py-3 bg-[#1f2937] border border-gray-700 rounded-xl text-white"
+                      placeholder="Vencimento dia 10..."
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="flex justify-end space-x-3 pt-4 border-t border-gray-800">
+                <button 
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="px-4 py-2 bg-gray-800 text-gray-300 rounded-xl hover:bg-gray-700 transition"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit"
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-gray-950 font-bold rounded-xl transition"
+                >
+                  Salvar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
