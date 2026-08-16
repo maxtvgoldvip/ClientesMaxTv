@@ -211,8 +211,16 @@ export default function App() {
   if (session && isExpired) {
     return (
       <div className="min-h-screen bg-[#0b0f19] flex items-center justify-center p-6 text-center">
-        <div className="bg-[#111827] border border-red-500/50 p-8 rounded-2xl shadow-2xl">
-          <h2 className="text-2xl font-bold text-red-500 mb-4">Assinatura Vencida. Contate o suporte.</h2>
+        <div className="bg-[#111827] border border-red-500/50 p-8 rounded-2xl shadow-2xl space-y-4 max-w-sm w-full">
+          <h2 className="text-2xl font-bold text-red-500">Assinatura Vencida</h2>
+          <p className="text-gray-300 text-sm">Sua mensalidade expirou. Contate o suporte para renovar o acesso.</p>
+          <button 
+            onClick={() => supabase.auth.signOut().then(() => setSession(null))} 
+            className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl flex items-center justify-center space-x-2"
+          >
+            <LogOut className="w-5 h-5" />
+            <span>Sair da Conta</span>
+          </button>
         </div>
       </div>
     );
