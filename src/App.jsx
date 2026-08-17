@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
-import { Tv, LogOut, Users, Settings, Plus, Search, Trash2, Edit2 } from 'lucide-react';
+import { Tv, DollarSign, Plus, Settings, LogOut, Trash2, Edit2, Search, CheckCircle, Users } from 'lucide-react';
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -8,13 +8,27 @@ export default function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [clients, setClients] = useState([]);
   const [resellers, setResellers] = useState([]);
   const [newResellerEmail, setNewResellerEmail] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [editingClient, setEditingClient] = useState(null);
 
   const adminEmail = 'maxtvgoldvip@gmail.com';
   const isAdmin = session && session.user.email === adminEmail;
 
-  const [config, setConfig] = useState({ data_vencimento: new Date().toISOString() });
+  const [config, setConfig] = useState({
+    custo_painel1: 5.00,
+    revenda_painel1: 8.00,
+    revenda_painel2: 5.00,
+    custo_painel2_fixo: 200.00,
+    data_vencimento: new Date().toISOString()
+  });
+
+  const [formData, setFormData] = useState({
+    nome: '', tipo: 'Cliente Direto', painel: 'Painel 1 (Sigma)', valor_plano: '', dispositivo: 'TV Box', observacoes: '', qtd_ativos_p1: 1, qtd_ativos_p2: 0
+  });
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -25,10 +39,23 @@ export default function App() {
       }
       setLoading(false);
     });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session) {
+        fetchAppData(session.user.id, session.user.email);
+        if (session.user.email === adminEmail) fetchAllResellers();
+      }
+      setLoading(false);
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
   const fetchAppData = async (userId, userEmail) => {
     try {
+      const { data: clientData } = await supabase.from('clientes_max').select('*').eq('user_id', userId);
+      if (clientData) setClients(clientData);
+
       let configData = null;
       if (userEmail === adminEmail) {
         const { data } = await supabase.from('config_max').select('*').eq('user_id', userId).maybeSingle();
@@ -37,7 +64,16 @@ export default function App() {
         const { data } = await supabase.from('config_max').select('*').eq('user_id', userEmail).maybeSingle();
         configData = data;
       }
-      if (configData) setConfig(configData);
+
+      if (configData) {
+        setConfig({
+          custo_painel1: configData.custo_painel1 ?? 5.00,
+          revenda_painel1: configData.revenda_painel1 ?? 8.00,
+          revenda_painel2: configData.revenda_painel2 ?? 5.00,
+          custo_painel2_fixo: configData.custo_painel2_fixo ?? 200.00,
+          data_vencimento: configData.data_vencimento ?? new Date().toISOString()
+        });
+      }
     } catch (e) { console.error(e); }
   };
 
@@ -60,10 +96,93 @@ export default function App() {
 
   const handleRenewReseller = async (id) => {
     let d = new Date(); d.setDate(d.getDate() + 30);
-    await supabase.from('config_max').update({ data_vencimento: d.toISOString() }).eq('id', id);
-    fetchAllResellers();
+    const { error } = await supabase.from('config_max').update({ data_vencimento: d.toISOString() }).eq('id', id);
+    if (error) alert('Erro ao renovar: ' + error.message);
+    else { alert('Assinatura renovada!'); fetchAllResellers(); }
   };
 
+  const handleAuth = async (e) => {
+    e.preventDefault();
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) alert(error.message);
+    else window.location.reload();
+  };
+
+  const handleSaveConfig = async () => {
+    if (!session) return;
+    const payload = { user_id: session.user.id, ...config };
+    const { error } = await supabase.from('config_max').upsert(payload, { onConflict: 'user_id' });
+    if (error) alert('Erro: ' + error.message);
+    else alert('Configurações salvas!');
+  };
+
+  const handleOpenEdit = (client) => {
+    setEditingClient(client);
+    setFormData({
+      nome: client.nome || '', tipo: client.tipo || 'Cliente Direto', painel: client.painel || 'Painel 1 (Sigma)',
+      valor_plano: client.valor_plano || '', dispositivo: client.dispositivo || 'TV Box', observacoes: client.observacoes || '',
+      qtd_ativos_p1: client.qtd_ativos_p1 || 1, qtd_ativos_p2: client.qtd_ativos_p2 || 0
+    });
+    setShowModal(true);
+  };
+
+  const handleSaveClient = async (e) => {
+    e.preventDefault();
+    if (!session) return;
+    let brutoCalculado = parseFloat(formData.valor_plano) || 0;
+    if (formData.tipo === 'Revendedor') {
+      brutoCalculado = ((parseInt(formData.qtd_ativos_p1) || 0) * config.revenda_painel1) + ((parseInt(formData.qtd_ativos_p2) || 0) * config.revenda_painel2);
+    }
+    const payload = {
+      user_id: session.user.id, nome: formData.nome, tipo: formData.tipo, painel: formData.painel,
+      valor_plano: brutoCalculado, dispositivo: formData.dispositivo, observacoes: formData.observacoes,
+      qtd_ativos_p1: parseInt(formData.qtd_ativos_p1) || 0, qtd_ativos_p2: parseInt(formData.qtd_ativos_p2) || 0
+    };
+    if (editingClient) {
+      await supabase.from('clientes_max').update(payload).eq('id', editingClient.id);
+      setClients(clients.map(c => c.id === editingClient.id ? { ...payload, id: c.id } : c));
+      setEditingClient(null);
+    } else {
+      const { data } = await supabase.from('clientes_max').insert([payload]).select();
+      if (data) setClients([data[0], ...clients]);
+    }
+    setShowModal(false);
+  };
+
+  const handleDelete = async (id) => {
+    if (confirm('Deseja excluir?')) {
+      await supabase.from('clientes_max').delete().eq('id', id);
+      setClients(clients.filter(c => c.id !== id));
+    }
+  };
+
+  const totalReceitaP2 = clients.reduce((acc, c) => {
+    if (c.tipo === 'Revendedor') return acc + ((c.qtd_ativos_p2 || 0) * config.revenda_painel2);
+    else if (c.painel.includes('Painel 2')) return acc + (c.valor_plano || 0);
+    return acc;
+  }, 0);
+
+  const painel2Pago = totalReceitaP2 >= (config.custo_painel2_fixo || 200);
+  const saldoP2Restante = Math.max(0, (config.custo_painel2_fixo || 200) - totalReceitaP2);
+
+  let receitaBrutaTotal = 0, custoTotalGeral = 0;
+  const calculatedClients = clients.map(client => {
+    let bruto = 0, custo = 0;
+    if (client.tipo === 'Revendedor') {
+      bruto = ((client.qtd_ativos_p1 || 0) * config.revenda_painel1) + ((client.qtd_ativos_p2 || 0) * config.revenda_painel2);
+      custo = (client.qtd_ativos_p1 || 0) * config.custo_painel1;
+    } else {
+      bruto = client.valor_plano || 0;
+      if (client.painel.includes('Painel 1')) custo = config.custo_painel1;
+      else if (isAdmin) custo = painel2Pago ? 0 : Math.min(bruto, saldoP2Restante);
+    }
+    receitaBrutaTotal += bruto;
+    custoTotalGeral += custo;
+    return { ...client, bruto, liquido: bruto - custo, custo };
+  });
+
+  const lucroLiquidoTotal = receitaBrutaTotal - custoTotalGeral;
+  const filteredClients = calculatedClients.filter(c => c.nome?.toLowerCase().includes(searchTerm.toLowerCase()));
   const isExpired = !isAdmin && new Date() > new Date(config.data_vencimento);
 
   if (loading) return <div className="p-10 text-amber-500 text-center">Carregando...</div>;
@@ -73,10 +192,8 @@ export default function App() {
       <div className="min-h-screen bg-[#0b0f19] flex items-center justify-center p-6 text-center">
         <div className="bg-[#111827] border border-red-500/50 p-8 rounded-2xl w-full max-w-sm shadow-2xl">
           <h2 className="text-2xl font-bold text-red-500 mb-2">Assinatura Vencida</h2>
-          <p className="text-gray-300 text-sm mb-6">Sua mensalidade expirou. Contate o suporte para renovar.</p>
-          <button onClick={() => supabase.auth.signOut().then(() => window.location.reload())} className="w-full bg-red-600 py-3 rounded-xl text-white font-bold flex items-center justify-center space-x-2">
-            <LogOut className="w-5 h-5" /><span>Sair da Conta</span>
-          </button>
+          <p className="text-gray-300 text-sm mb-6">Contate o administrador para renovar.</p>
+          <button onClick={() => supabase.auth.signOut().then(() => window.location.reload())} className="w-full bg-red-600 py-3 rounded-xl text-white font-bold">Sair da Conta</button>
         </div>
       </div>
     );
@@ -85,10 +202,10 @@ export default function App() {
   if (!session) {
     return (
       <div className="min-h-screen bg-[#0b0f19] flex items-center justify-center p-4">
-        <form onSubmit={async (e) => { e.preventDefault(); const { error } = await supabase.auth.signInWithPassword({ email, password }); if(error) alert(error.message); else window.location.reload(); }} className="bg-[#111827] border border-gray-800 p-8 rounded-2xl w-full max-w-sm shadow-2xl space-y-4">
+        <form onSubmit={handleAuth} className="bg-[#111827] border border-gray-800 p-8 rounded-2xl w-full max-w-sm shadow-2xl space-y-4">
           <h1 className="text-xl font-bold text-white text-center">MAX TV <span className="text-amber-400">GOLD VIP</span></h1>
-          <input type="email" placeholder="E-mail" onChange={(e) => setEmail(e.target.value)} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white outline-none focus:border-amber-500 text-sm" />
-          <input type="password" placeholder="Senha" onChange={(e) => setPassword(e.target.value)} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white outline-none focus:border-amber-500 text-sm" />
+          <input type="email" placeholder="E-mail" onChange={(e) => setEmail(e.target.value)} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white outline-none text-sm" />
+          <input type="password" placeholder="Senha" onChange={(e) => setPassword(e.target.value)} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white outline-none text-sm" />
           <button type="submit" className="w-full bg-amber-500 text-gray-950 p-3 rounded-xl font-bold">Entrar</button>
         </form>
       </div>
@@ -97,7 +214,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0b0f19] text-gray-100 flex flex-col">
-      {/* Cabeçalho Organizado e Responsivo */}
       <header className="bg-[#111827] border-b border-gray-800 sticky top-0 z-30 px-4 py-3">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-3">
           <div className="flex items-center space-x-2">
@@ -105,47 +221,189 @@ export default function App() {
             <h1 className="text-base font-bold tracking-wide">MAX TV <span className="text-amber-400">GOLD VIP</span></h1>
           </div>
           <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto justify-center pb-1 sm:pb-0">
-            <button onClick={() => setActiveTab('dashboard')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${activeTab === 'dashboard' ? 'bg-amber-500 text-gray-950 font-bold' : 'bg-gray-800 text-gray-300'}`}>Painel</button>
-            {isAdmin && <button onClick={() => setActiveTab('revendedores')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${activeTab === 'revendedores' ? 'bg-amber-500 text-gray-950 font-bold' : 'bg-gray-800 text-gray-300'}`}>Revendedores</button>}
-            <button onClick={() => setActiveTab('config')} className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${activeTab === 'config' ? 'bg-amber-500 text-gray-950 font-bold' : 'bg-gray-800 text-gray-300'}`}>Configurações</button>
+            <button onClick={() => setActiveTab('dashboard')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${activeTab === 'dashboard' ? 'bg-amber-500 text-gray-950 font-bold' : 'bg-gray-800 text-gray-300'}`}>Painel</button>
+            {isAdmin && <button onClick={() => setActiveTab('revendedores')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${activeTab === 'revendedores' ? 'bg-amber-500 text-gray-950 font-bold' : 'bg-gray-800 text-gray-300'}`}>Revendedores</button>}
+            <button onClick={() => setActiveTab('config')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${activeTab === 'config' ? 'bg-amber-500 text-gray-950 font-bold' : 'bg-gray-800 text-gray-300'}`}>Configurações</button>
             <button onClick={() => supabase.auth.signOut().then(() => window.location.reload())} className="p-1.5 bg-red-950/60 text-red-400 rounded-lg ml-2" title="Sair"><LogOut className="w-4 h-4" /></button>
           </div>
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto p-4 w-full flex-1 space-y-4">
+      <main className="max-w-7xl mx-auto p-4 w-full flex-1 space-y-6">
         {activeTab === 'dashboard' && (
-          <div className="bg-[#111827] border border-gray-800 p-6 rounded-2xl shadow-xl">
-            <h2 className="text-lg font-bold text-white mb-2">Painel de Clientes</h2>
-            <p className="text-gray-400 text-sm">Gerencie seus clientes e ativos por aqui.</p>
-          </div>
+          <>
+            {isAdmin && (
+              <div className={`p-4 rounded-2xl border flex items-center justify-between ${painel2Pago ? 'bg-green-950/30 border-green-500/50 text-green-300' : 'bg-amber-950/30 border-amber-500/50 text-amber-300'}`}>
+                <div className="flex items-center space-x-3">
+                  {painel2Pago ? <CheckCircle className="w-6 h-6 text-green-400" /> : <DollarSign className="w-6 h-6 text-amber-400" />}
+                  <div>
+                    <h4 className="font-bold text-xs sm:text-sm">Status do Custo Fixo — Painel 2</h4>
+                    <p className="text-xs opacity-90">{painel2Pago ? "Painel 2 PAGO com folga!" : `Faltam R$ ${saldoP2Restante.toFixed(2)} para quitar o fixo.`}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-[#111827] border border-gray-800 rounded-2xl p-5 shadow-xl">
+                <p className="text-xs uppercase text-gray-400 font-semibold">Receita Bruta Total</p>
+                <h3 className="text-2xl font-bold text-white mt-1">R$ {receitaBrutaTotal.toFixed(2)}</h3>
+              </div>
+              <div className="bg-[#111827] border border-gray-800 rounded-2xl p-5 shadow-xl">
+                <p className="text-xs uppercase text-gray-400 font-semibold">Lucro Líquido</p>
+                <h3 className="text-2xl font-bold text-green-400 mt-1">R$ {lucroLiquidoTotal.toFixed(2)}</h3>
+              </div>
+            </div>
+
+            <div className="flex flex-col sm:flex-row justify-between items-center gap-3 bg-[#111827] p-4 rounded-2xl border border-gray-800">
+              <div className="relative w-full sm:w-80">
+                <Search className="absolute left-3 top-3 w-4 h-4 text-gray-500" />
+                <input type="text" placeholder="Buscar..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full pl-9 pr-4 py-2 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm outline-none" />
+              </div>
+              <button onClick={() => { setEditingClient(null); setShowModal(true); }} className="w-full sm:w-auto flex items-center justify-center space-x-2 px-5 py-2.5 bg-amber-500 text-gray-950 font-bold rounded-xl text-sm shadow-lg">
+                <Plus className="w-4 h-4" /><span>Adicionar Novo</span>
+              </button>
+            </div>
+
+            <div className="bg-[#111827] border border-gray-800 rounded-2xl overflow-x-auto">
+              <table className="w-full text-left border-collapse min-w-[600px]">
+                <thead>
+                  <tr className="bg-gray-900/50 border-b border-gray-800 text-xs uppercase text-gray-400">
+                    <th className="p-3">Nome / Tipo</th>
+                    <th className="p-3">Painel</th>
+                    <th className="p-3">Detalhes</th>
+                    <th className="p-3">Bruto</th>
+                    <th className="p-3">Líquido</th>
+                    <th className="p-3 text-right">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-800 text-sm">
+                  {filteredClients.length === 0 ? (
+                    <tr><td colSpan="6" className="p-6 text-center text-gray-500">Nenhum cliente cadastrado.</td></tr>
+                  ) : (
+                    filteredClients.map((client) => (
+                      <tr key={client.id} className="hover:bg-gray-900/30">
+                        <td className="p-3 font-medium text-white">{client.nome}<br/><span className="text-xs text-purple-400">{client.tipo}</span></td>
+                        <td className="p-3 text-gray-300 text-xs">{client.painel}</td>
+                        <td className="p-3 text-gray-300 text-xs">{client.tipo === 'Revendedor' ? `P1: ${client.qtd_ativos_p1} | P2: ${client.qtd_ativos_p2}` : client.dispositivo}</td>
+                        <td className="p-3 font-semibold text-white">R$ {client.bruto.toFixed(2)}</td>
+                        <td className="p-3 font-semibold text-green-400">R$ {client.liquido.toFixed(2)}</td>
+                        <td className="p-3 text-right space-x-1">
+                          <button onClick={() => handleOpenEdit(client)} className="p-1.5 bg-amber-500/15 text-amber-400 rounded-lg"><Edit2 className="w-4 h-4" /></button>
+                          <button onClick={() => handleDelete(client.id)} className="p-1.5 bg-red-950/40 text-red-400 rounded-lg"><Trash2 className="w-4 h-4" /></button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
 
         {activeTab === 'revendedores' && isAdmin && (
           <div className="bg-[#111827] border border-gray-800 p-6 rounded-2xl shadow-xl space-y-4">
-            <h2 className="text-lg font-bold text-white">Gestão de Revendedores</h2>
+            <h2 className="text-lg font-bold text-white flex items-center space-x-2"><Users className="w-5 h-5 text-amber-400" /><span>Gestão de Revendedores</span></h2>
             <div className="flex flex-col sm:flex-row gap-2">
-              <input type="email" placeholder="E-mail do revendedor" value={newResellerEmail} onChange={(e) => setNewResellerEmail(e.target.value)} className="flex-1 p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm outline-none focus:border-amber-500" />
-              <button onClick={handleManualAddReseller} className="bg-green-600 hover:bg-green-700 px-5 py-3 rounded-xl font-bold text-white text-sm transition">Adicionar</button>
+              <input type="email" placeholder="E-mail do revendedor" value={newResellerEmail} onChange={(e) => setNewResellerEmail(e.target.value)} className="flex-1 p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm outline-none" />
+              <button onClick={handleManualAddReseller} className="bg-green-600 hover:bg-green-700 px-5 py-3 rounded-xl font-bold text-white text-sm">Adicionar</button>
             </div>
             <div className="space-y-2 pt-2">
-              {resellers.map(r => (
-                <div key={r.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 bg-gray-900 border border-gray-800 rounded-xl gap-2">
-                  <span className="text-xs font-mono text-gray-300 break-all">{r.user_id} <br/><span className="text-gray-500">Venc: {new Date(r.data_vencimento).toLocaleDateString()}</span></span>
-                  <button onClick={() => handleRenewReseller(r.id)} className="w-full sm:w-auto bg-amber-500 text-gray-950 px-4 py-2 rounded-lg font-bold text-xs">Renovar +30 Dias</button>
-                </div>
-              ))}
+              {resellers.map(r => {
+                const vencido = new Date() > new Date(r.data_vencimento);
+                return (
+                  <div key={r.id} className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-3 bg-gray-900 border border-gray-800 rounded-xl gap-2">
+                    <span className="text-xs font-mono text-gray-300 break-all">{r.user_id} <br/><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${vencido ? 'bg-red-950 text-red-400' : 'bg-green-950 text-green-400'}`}>{vencido ? 'VENCIDO' : 'ATIVO'}</span> — Venc: {new Date(r.data_vencimento).toLocaleDateString()}</span>
+                    <button onClick={() => handleRenewReseller(r.id)} className="w-full sm:w-auto bg-amber-500 text-gray-950 px-4 py-2 rounded-lg font-bold text-xs">Renovar +30 Dias</button>
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
 
         {activeTab === 'config' && (
-          <div className="bg-[#111827] border border-gray-800 p-6 rounded-2xl shadow-xl max-w-lg mx-auto text-center space-y-4">
-            <h2 className="text-lg font-bold text-white">Configurações do Sistema</h2>
-            <p className="text-sm text-gray-400">Painel configurado e pronto para uso.</p>
+          <div className="bg-[#111827] border border-gray-800 p-6 rounded-2xl shadow-xl max-w-lg mx-auto space-y-4">
+            <h2 className="text-lg font-bold text-white">Configurações</h2>
+            <div>
+              <label className="block text-xs uppercase text-gray-400 mb-1">Revenda Painel 1</label>
+              <input type="number" step="0.01" value={config.revenda_painel1} onChange={(e) => setConfig({...config, revenda_painel1: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs uppercase text-gray-400 mb-1">Revenda Painel 2</label>
+              <input type="number" step="0.01" value={config.revenda_painel2} onChange={(e) => setConfig({...config, revenda_painel2: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
+            </div>
+            {isAdmin && (
+              <>
+                <div>
+                  <label className="block text-xs uppercase text-gray-400 mb-1">Custo por Ativo - Painel 1</label>
+                  <input type="number" step="0.01" value={config.custo_painel1} onChange={(e) => setConfig({...config, custo_painel1: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
+                </div>
+                <div>
+                  <label className="block text-xs uppercase text-gray-400 mb-1">Custo Fixo - Painel 2</label>
+                  <input type="number" step="0.01" value={config.custo_painel2_fixo} onChange={(e) => setConfig({...config, custo_painel2_fixo: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
+                </div>
+              </>
+            )}
+            <button onClick={handleSaveConfig} className="w-full bg-amber-500 text-gray-950 p-3 rounded-xl font-bold text-sm">Salvar Configurações</button>
           </div>
         )}
       </main>
+
+      {showModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#111827] border border-gray-800 rounded-2xl w-full max-w-lg p-6 space-y-4">
+            <h3 className="text-lg font-bold text-white">{editingClient ? 'Editar Cadastro' : 'Novo Cadastro'}</h3>
+            <form onSubmit={handleSaveClient} className="space-y-3">
+              <div>
+                <label className="block text-xs uppercase text-gray-400 mb-1">Tipo</label>
+                <select value={formData.tipo} onChange={(e) => setFormData({...formData, tipo: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm">
+                  <option value="Cliente Direto">Cliente Direto</option>
+                  <option value="Revendedor">Revendedor</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs uppercase text-gray-400 mb-1">Nome</label>
+                <input type="text" required value={formData.nome} onChange={(e) => setFormData({...formData, nome: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
+              </div>
+              <div>
+                <label className="block text-xs uppercase text-gray-400 mb-1">Painel</label>
+                <select value={formData.painel} onChange={(e) => setFormData({...formData, painel: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm">
+                  <option value="Painel 1 (Sigma)">Painel 1 (Sigma)</option>
+                  <option value="Painel 2 (Zenpanel)">Painel 2 (Zenpanel)</option>
+                </select>
+              </div>
+              {formData.tipo === 'Revendedor' ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs uppercase text-gray-400 mb-1">Ativos P1</label>
+                    <input type="number" min="0" value={formData.qtd_ativos_p1} onChange={(e) => setFormData({...formData, qtd_ativos_p1: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs uppercase text-gray-400 mb-1">Ativos P2</label>
+                    <input type="number" min="0" value={formData.qtd_ativos_p2} onChange={(e) => setFormData({...formData, qtd_ativos_p2: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-xs uppercase text-gray-400 mb-1">Valor do Plano (R$)</label>
+                    <input type="number" step="0.01" required value={formData.valor_plano} onChange={(e) => setFormData({...formData, valor_plano: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-xs uppercase text-gray-400 mb-1">Dispositivo</label>
+                    <input type="text" value={formData.dispositivo} onChange={(e) => setFormData({...formData, dispositivo: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
+                  </div>
+                </>
+              )}
+              <div className="flex justify-end space-x-2 pt-3 border-t border-gray-800">
+                <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 bg-gray-800 text-gray-300 rounded-xl text-sm">Cancelar</button>
+                <button type="submit" className="px-5 py-2 bg-amber-500 text-gray-950 font-bold rounded-xl text-sm">Salvar</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
