@@ -16,8 +16,10 @@ export default function App() {
   const adminEmail = 'maxtvgoldvip@gmail.com';
   const isAdmin = session && session.user.email === adminEmail;
 
+  // Configurações agora incluem o custo do painel 1 e painel 2 para o revendedor
   const [config, setConfig] = useState({
     custo_painel1: 5.00,
+    custo_painel2: 5.00,
     revenda_painel1: 8.00,
     revenda_painel2: 5.00,
     custo_painel2_fixo: 200.00
@@ -37,20 +39,29 @@ export default function App() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) fetchAppData(session.user.id);
+      if (session) fetchAppData(session.user.id, session.user.email);
       setLoading(false);
     });
   }, []);
 
-  const fetchAppData = async (userId) => {
+  const fetchAppData = async (userId, userEmail) => {
     try {
       const { data: clientData } = await supabase.from('clientes_max').select('*').eq('user_id', userId);
       if (clientData) setClients(clientData);
 
-      const { data: configData } = await supabase.from('config_max').select('*').eq('user_id', userId).maybeSingle();
+      let configData = null;
+      if (userEmail === adminEmail) {
+        const { data } = await supabase.from('config_max').select('*').eq('user_id', userId).maybeSingle();
+        configData = data;
+      } else {
+        const { data } = await supabase.from('config_max').select('*').eq('user_id', userEmail).maybeSingle();
+        configData = data;
+      }
+
       if (configData) {
         setConfig({
           custo_painel1: configData.custo_painel1 ?? 5.00,
+          custo_painel2: configData.custo_painel2 ?? 5.00,
           revenda_painel1: configData.revenda_painel1 ?? 8.00,
           revenda_painel2: configData.revenda_painel2 ?? 5.00,
           custo_painel2_fixo: configData.custo_painel2_fixo ?? 200.00
@@ -70,10 +81,18 @@ export default function App() {
 
   const handleSaveConfig = async () => {
     if (!session) return;
-    const payload = { user_id: session.user.id, ...config };
+    const identifier = isAdmin ? session.user.id : session.user.email;
+    const payload = { 
+      user_id: identifier, 
+      custo_painel1: parseFloat(config.custo_painel1) || 0,
+      custo_painel2: parseFloat(config.custo_painel2) || 0,
+      revenda_painel1: parseFloat(config.revenda_painel1) || 0,
+      revenda_painel2: parseFloat(config.revenda_painel2) || 0,
+      custo_painel2_fixo: parseFloat(config.custo_painel2_fixo) || 0
+    };
     const { error } = await supabase.from('config_max').upsert(payload, { onConflict: 'user_id' });
     if (error) alert('Erro: ' + error.message);
-    else alert('Configurações salvas!');
+    else alert('Configurações salvas com sucesso!');
   };
 
   const handleOpenEdit = (client) => {
@@ -121,7 +140,7 @@ export default function App() {
       await supabase.from('clientes_max').insert([payload]);
     }
     setShowModal(false);
-    fetchAppData(session.user.id);
+    fetchAppData(session.user.id, session.user.email);
   };
 
   const handleDelete = async (id) => {
@@ -149,7 +168,8 @@ export default function App() {
       const p1 = client.qtd_ativos_p1 || 0;
       const p2 = client.qtd_ativos_p2 || 0;
       bruto = (p1 * config.revenda_painel1) + (p2 * config.revenda_painel2);
-      custo = (p1 * config.custo_painel1) + (p2 * 5.00);
+      // Deduzindo o custo do painel 1 e painel 2 configurados no painel
+      custo = (p1 * config.custo_painel1) + (p2 * config.custo_painel2);
     } else {
       bruto = client.valor_plano || 0;
       if (client.painel.includes('Painel 1')) custo = config.custo_painel1;
@@ -197,18 +217,6 @@ export default function App() {
       <main className="max-w-7xl mx-auto p-4 w-full flex-1 space-y-6">
         {activeTab === 'dashboard' && (
           <>
-            {isAdmin && (
-              <div className={`p-4 rounded-2xl border flex items-center justify-between ${painel2Pago ? 'bg-green-950/30 border-green-500/50 text-green-300' : 'bg-amber-950/30 border-amber-500/50 text-amber-300'}`}>
-                <div className="flex items-center space-x-3">
-                  {painel2Pago ? <CheckCircle className="w-6 h-6 text-green-400" /> : <DollarSign className="w-6 h-6 text-amber-400" />}
-                  <div>
-                    <h4 className="font-bold text-xs">Status do Custo Fixo — Painel 2</h4>
-                    <p className="text-[11px] opacity-90">{painel2Pago ? "Painel 2 PAGO com folga!" : `Faltam R$ ${saldoP2Restante.toFixed(2)} para quitar o fixo.`}</p>
-                  </div>
-                </div>
-              </div>
-            )}
-
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="bg-[#111827] border border-gray-800 rounded-2xl p-5 shadow-xl">
                 <p className="text-xs uppercase text-gray-400 font-semibold">Receita Bruta Total</p>
@@ -268,27 +276,23 @@ export default function App() {
 
         {activeTab === 'config' && (
           <div className="bg-[#111827] border border-gray-800 p-6 rounded-2xl shadow-xl max-w-lg mx-auto space-y-4">
-            <h2 className="text-lg font-bold text-white">Configurações</h2>
+            <h2 className="text-lg font-bold text-white">Configurações de Custos e Revenda</h2>
             <div>
-              <label className="block text-xs uppercase text-gray-400 mb-1">Revenda Painel 1</label>
+              <label className="block text-xs uppercase text-gray-400 mb-1">Custo por Ativo - Painel 1 (O que você paga)</label>
+              <input type="number" step="0.01" value={config.custo_painel1} onChange={(e) => setConfig({...config, custo_painel1: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs uppercase text-gray-400 mb-1">Custo por Ativo - Painel 2 (O que você paga)</label>
+              <input type="number" step="0.01" value={config.custo_painel2} onChange={(e) => setConfig({...config, custo_painel2: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs uppercase text-gray-400 mb-1">Preço de Venda/Revenda - Painel 1</label>
               <input type="number" step="0.01" value={config.revenda_painel1} onChange={(e) => setConfig({...config, revenda_painel1: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
             </div>
             <div>
-              <label className="block text-xs uppercase text-gray-400 mb-1">Revenda Painel 2</label>
+              <label className="block text-xs uppercase text-gray-400 mb-1">Preço de Venda/Revenda - Painel 2</label>
               <input type="number" step="0.01" value={config.revenda_painel2} onChange={(e) => setConfig({...config, revenda_painel2: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
             </div>
-            {isAdmin && (
-              <>
-                <div>
-                  <label className="block text-xs uppercase text-gray-400 mb-1">Custo por Ativo - Painel 1</label>
-                  <input type="number" step="0.01" value={config.custo_painel1} onChange={(e) => setConfig({...config, custo_painel1: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
-                </div>
-                <div>
-                  <label className="block text-xs uppercase text-gray-400 mb-1">Custo Fixo - Painel 2</label>
-                  <input type="number" step="0.01" value={config.custo_painel2_fixo} onChange={(e) => setConfig({...config, custo_painel2_fixo: e.target.value})} className="w-full p-3 bg-gray-900 border border-gray-700 rounded-xl text-white text-sm" />
-                </div>
-              </>
-            )}
             <button onClick={handleSaveConfig} className="w-full bg-amber-500 text-gray-950 p-3 rounded-xl font-bold text-sm">Salvar Configurações</button>
           </div>
         )}
